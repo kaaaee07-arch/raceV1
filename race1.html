@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Street Race V1.0 - Professional Performance</title>
+    <style>
+        /* CSS Umum dan Full Screen */
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100vw; 
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            position: absolute;
+            top: 5px;
+            z-index: 10;
+            font-size: 1.2em;
+            color: #ffcc00;
+        }
+
+        #game-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-canvas {
+            display: block;
+            max-width: 600px; 
+            height: 100%; 
+            border: 3px solid #ffcc00;
+            background-color: #333333; /* Warna dasar jalan */
+        }
+        
+        /* HUD Styling (Dihilangkan elemen difficulty) */
+        #hud {
+            position: absolute;
+            top: 50px;
+            right: 10px;
+            padding: 10px 15px;
+            background: rgba(0, 0, 0, 0.7);
+            border-right: 5px solid #00AAFF;
+            border-radius: 5px 0 0 5px;
+            font-size: 1em;
+            z-index: 15;
+            color: #fff;
+        }
+
+        /* Kontrol Mobile */
+        #mobile-controls {
+            position: fixed;
+            bottom: 10px;
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            z-index: 20;
+        }
+        
+        .control-area {
+            display: flex;
+            align-items: flex-end;
+        }
+
+        .dpad-button {
+            width: 65px;
+            height: 65px;
+            margin: 5px;
+            background-color: rgba(255, 204, 0, 0.9);
+            color: #1a1a1a;
+            font-size: 24px;
+            font-weight: bold;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 0 rgba(0, 0, 0, 0.6);
+            transition: transform 0.1s;
+        }
+
+        .dpad-button:active {
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+            transform: translateY(3px);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🚀 Street Racer (V1.0 - Street Race)</h1>
+
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+    </div>
+
+    <div id="hud">
+        <div>Kecepatan: <span id="speed-display" class="value">0 km/j</span></div>
+        <div>Skor Jarak: <span id="distance-display" class="value">0 m</span></div>
+    </div>
+
+    <div id="mobile-controls">
+        <div id="rotation-controls" class="control-area">
+            <div class="dpad-button" id="btn-left">◀️</div>
+            <div class="dpad-button" id="btn-right">▶️</div>
+        </div>
+
+        <div id="acceleration-controls" class="control-area">
+            <div class="dpad-button" id="btn-accelerate">🚀</div>
+        </div>
+    </div>
+
+<script>
+    // Pastikan semua elemen DOM dimuat
+    window.addEventListener('load', initGame);
+    window.addEventListener('resize', resizeCanvas);
+
+    // --- Variabel Konfigurasi Game (Disatukan dan Dioptimalkan) ---
+    const PLAYER_W = 30; 
+    const PLAYER_H = 50; 
+    const MAX_SPEED = 9; // Kecepatan maksimum tetap
+    const ACCELERATION = 0.25; // Akselerasi lebih cepat
+    const SIDE_SPEED = 4; // Kecepatan samping lebih cepat
+    const COLLISION_DAMPING = 0.1; 
+    const SPEED_MULTIPLIER = 15; 
+    const LANE_COUNT = 4; 
+    const TRAFFIC_SPAWN_INTERVAL_BASE = 1200; // Interval spawn dasar
+    const TRAFFIC_MIN_SPEED = 2;
+    const TRAFFIC_MAX_SPEED = 5;
+    const TRAFFIC_COLORS = ['#0000FF', '#00008B', '#00FF00', '#FFFF00', '#FF00FF'];
+    
+    // --- Variabel State ---
+    let friction = 0.01; 
+    let gameState = 'READY'; 
+    let car = { x: 0, y: 0, speed: 0, color: '#FF4500' };
+    let keys = { w: false, a: false, d: false, accelerate: false, left: false, right: false };
+    let roadOffset = 0;
+    let distance = 0;
+    let trafficCars = [];
+    let LANE_WIDTH = 0;
+    let lastTrafficSpawnTime = 0;
+
+    // --- DOM Elements ---
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('game-container');
+    const speedDisplay = document.getElementById('speed-display');
+    const distanceDisplay = document.getElementById('distance-display');
+
+    function initGame() {
+        resizeCanvas();
+        setupControls();
+        // setupDifficultySelector() dan applyDifficultySettings() Dihilangkan
+        requestAnimationFrame(gameLoop); 
+    }
+
+    // --- Fungsi Resizing dan Rendering ---
+
+    function resizeCanvas() {
+        const maxW = 600; 
+        const viewW = container.clientWidth;
+        const viewH = container.clientHeight;
+
+        canvas.height = viewH;
+        
+        if (viewW > maxW) {
+            canvas.width = maxW;
+        } else {
+            canvas.width = viewW;
+        }
+        
+        LANE_WIDTH = canvas.width / LANE_COUNT;
+        car.x = canvas.width / 2;
+        car.y = canvas.height * 0.8;
+        trafficCars = [];
+    }
+    
+    // --- PENINGKATAN PERFORMA: Draw Road (Menggambar dalam satu loop) ---
+    function drawRoad() {
+        const laneMarkerWidth = 10;
+        const markerHeight = 50;
+        const markerGap = 50;
+        const totalMarkerLength = markerHeight + markerGap;
+        const boundaryLineWidth = 5; 
+        const boundaryGap = canvas.width / 10;
+        const leftBoundaryX = boundaryGap / 2;
+        const rightBoundaryX = canvas.width - boundaryGap / 2;
+
+        ctx.fillStyle = '#FFFFFF';
+        
+        let startY = roadOffset % totalMarkerLength;
+        
+        // Loop tunggal untuk menggambar semua marka jalan (performa lebih baik)
+        while (startY < canvas.height) {
+            // Gambar Garis Tengah (Putus-putus)
+            for (let i = 1; i < LANE_COUNT; i++) {
+                const laneCenter = LANE_WIDTH * i;
+                ctx.fillRect(laneCenter - laneMarkerWidth / 2, startY, laneMarkerWidth, markerHeight);
+            }
+            
+            // Gambar Garis Tepi Kiri (Putus-putus)
+            ctx.fillRect(leftBoundaryX - boundaryLineWidth / 2, startY, boundaryLineWidth, markerHeight);
+            
+            // Gambar Garis Tepi Kanan (Putus-putus)
+            ctx.fillRect(rightBoundaryX - boundaryLineWidth / 2, startY, boundaryLineWidth, markerHeight);
+            
+            startY += totalMarkerLength;
+        }
+    }
+
+    function drawPlayerCar() {
+        ctx.save();
+        ctx.translate(car.x, car.y);
+        
+        ctx.fillStyle = car.color;
+        ctx.beginPath();
+        ctx.moveTo(-PLAYER_W / 2, -PLAYER_H / 2); 
+        ctx.lineTo(PLAYER_W / 2, -PLAYER_H / 2);  
+        ctx.lineTo(PLAYER_W / 2 - 5, PLAYER_H / 2); 
+        ctx.lineTo(-PLAYER_W / 2 + 5, PLAYER_H / 2); 
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.fillStyle = '#FFFF00';
+        ctx.fillRect(PLAYER_W / 2 - 8, -PLAYER_H / 2 + 2, 5, 5); 
+        ctx.fillRect(-PLAYER_W / 2 + 3, -PLAYER_H / 2 + 2, 5, 5); 
+
+        ctx.fillStyle = '#33AADD';
+        ctx.fillRect(-PLAYER_W / 2 + 5, -10, PLAYER_W - 10, 15);
+        
+        ctx.restore();
+    }
+
+    function drawTrafficCar(traffic) {
+        ctx.fillStyle = traffic.color;
+        ctx.fillRect(traffic.x - traffic.width / 2, traffic.y - traffic.height / 2, traffic.width, traffic.height);
+        ctx.fillStyle = '#FF0000';
+        ctx.fillRect(traffic.x - traffic.width / 2 + 2, traffic.y + traffic.height / 2 - 5, 5, 3);
+        ctx.fillRect(traffic.x + traffic.width / 2 - 7, traffic.y + traffic.height / 2 - 5, 5, 3);
+    }
+    
+    function drawOverlay() {
+        if (gameState === 'READY') {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#FFCC00';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('SIAP BALAPAN!', canvas.width / 2, canvas.height / 2 - 30);
+            
+            ctx.font = '20px Arial';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText('Tekan 🚀 (atau W) untuk Mulai', canvas.width / 2, canvas.height / 2 + 10);
+            ctx.fillText(`Jarak Terbaik: ${Math.floor(localStorage.getItem('bestDistance') || 0)} m`, canvas.width / 2, canvas.height / 2 + 50);
+
+        } else if (gameState === 'GAME_OVER') {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '40px Impact';
+            ctx.textAlign = 'center';
+            ctx.fillText('CRASH!', canvas.width / 2, canvas.height / 2 - 50);
+
+            ctx.font = '25px Arial';
+            ctx.fillText(`Skor Anda: ${Math.floor(distance)} m`, canvas.width / 2, canvas.height / 2);
+            
+            ctx.font = '20px Arial';
+            ctx.fillText('Tekan 🚀 (atau W) untuk Ulang', canvas.width / 2, canvas.height / 2 + 40);
+        }
+    }
+
+
+    // --- Logika Game (Update dan Loop) ---
+
+    function updateTrafficCars() {
+        trafficCars = trafficCars.filter(car => car.y < canvas.height + car.height);
+        trafficCars.forEach(traffic => {
+            traffic.y += car.speed - traffic.speed; 
+        });
+    }
+
+    function spawnTrafficCar() {
+        if (gameState !== 'RUNNING') return;
+        const now = performance.now();
+        
+        // Kesulitan Dinamis Tunggal (spawn interval berkurang seiring jarak)
+        const currentInterval = Math.max(500, TRAFFIC_SPAWN_INTERVAL_BASE - distance * 0.5); 
+        
+        if (now - lastTrafficSpawnTime < currentInterval) return;
+
+        const laneIndex = Math.floor(Math.random() * LANE_COUNT);
+        const trafficX = (laneIndex * LANE_WIDTH) + (LANE_WIDTH / 2);
+        
+        const speed = Math.random() * (TRAFFIC_MAX_SPEED - TRAFFIC_MIN_SPEED) + TRAFFIC_MIN_SPEED;
+        const colorIndex = Math.floor(Math.random() * TRAFFIC_COLORS.length);
+
+        trafficCars.push({
+            x: trafficX,
+            y: -PLAYER_H * 2,
+            width: PLAYER_W * 0.9,
+            height: PLAYER_H * 0.8,
+            speed: speed,
+            color: TRAFFIC_COLORS[colorIndex]
+        });
+
+        lastTrafficSpawnTime = now;
+    }
+
+    function checkCollision() {
+        const playerLeft = car.x - PLAYER_W / 2 + 5;
+        const playerRight = car.x + PLAYER_W / 2 - 5;
+        
+        // Tabrakan Batas Kiri/Kanan
+        if (playerLeft < 0 || playerRight > canvas.width) {
+             car.speed *= COLLISION_DAMPING;
+             if (playerLeft < 0) car.x += 5;
+             if (playerRight > canvas.width) car.x -= 5;
+        }
+
+        trafficCars.forEach(traffic => {
+            const trafficLeft = traffic.x - traffic.width / 2;
+            const trafficRight = traffic.x + traffic.width / 2;
+            const trafficTop = traffic.y - traffic.height / 2;
+            const trafficBottom = traffic.y + traffic.height / 2;
+
+            if (playerRight > trafficLeft && playerLeft < trafficRight && 
+                car.y + PLAYER_H / 2 - 5 > trafficTop && car.y - PLAYER_H / 2 + 5 < trafficBottom) {
+                
+                handleGameOver();
+            } 
+        });
+    }
+
+    function handleGameOver() {
+        if (gameState === 'RUNNING') {
+            gameState = 'GAME_OVER';
+            const bestDist = parseFloat(localStorage.getItem('bestDistance')) || 0;
+            if (distance > bestDist) {
+                localStorage.setItem('bestDistance', Math.floor(distance));
+            }
+        }
+    }
+
+    function resetGame() {
+        car.speed = 0;
+        car.x = canvas.width / 2;
+        distance = 0;
+        trafficCars = [];
+        gameState = 'RUNNING';
+        lastTrafficSpawnTime = 0;
+    }
+
+    function update() {
+        if (gameState === 'RUNNING') {
+            const isAccelerating = keys.w || keys.accelerate;
+            const isTurningLeft = keys.a || keys.left;
+            const isTurningRight = keys.d || keys.right;
+
+            // Pergerakan Kecepatan (Y Axis)
+            if (isAccelerating) {
+                car.speed = Math.min(car.speed + ACCELERATION, MAX_SPEED);
+            } else {
+                car.speed = Math.max(friction, car.speed - friction); // Mobil selalu berjalan
+            }
+
+            // Pergerakan Samping (X Axis)
+            if (isTurningLeft) {
+                car.x = Math.max(PLAYER_W / 2, car.x - SIDE_SPEED);
+            }
+            if (isTurningRight) {
+                car.x = Math.min(canvas.width - PLAYER_W / 2, car.x + SIDE_SPEED);
+            }
+            
+            roadOffset += car.speed * 2; 
+            distance += car.speed * 0.1; 
+
+            spawnTrafficCar();
+            updateTrafficCars();
+            checkCollision();
+        } 
+        
+        if ((gameState === 'READY' || gameState === 'GAME_OVER') && (keys.w || keys.accelerate)) {
+            resetGame();
+        }
+    }
+    
+    function draw() {
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        drawRoad(); 
+        trafficCars.forEach(drawTrafficCar);
+        drawPlayerCar(); 
+        
+        drawOverlay();
+
+        updateHUD();
+    }
+
+    function gameLoop(timestamp) {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+    
+    // --- Penanganan Kontrol (Dipertahankan) ---
+    function setupControls() {
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w') keys.w = true;
+            if (key === 'a') keys.a = true;
+            if (key === 'd') keys.d = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (key === 'w') keys.w = false;
+            if (key === 'a') keys.a = false;
+            if (key === 'd') keys.d = false;
+        });
+
+        function setMobileKey(btnId, controlKey) {
+            const btn = document.getElementById(btnId);
+            
+            const activate = (e) => { 
+                e.preventDefault(); 
+                keys[controlKey] = true;
+                if (controlKey === 'accelerate') keys.w = true; 
+                if (controlKey === 'left') keys.a = true; 
+                if (controlKey === 'right') keys.d = true; 
+            };
+            const deactivate = (e) => { 
+                e.preventDefault();
+                keys[controlKey] = false; 
+                if (controlKey === 'accelerate') keys.w = false; 
+                if (controlKey === 'left') keys.a = false; 
+                if (controlKey === 'right') keys.d = false; 
+            };
+
+            btn.addEventListener('touchstart', activate, { passive: false });
+            btn.addEventListener('touchend', deactivate, { passive: false });
+            btn.addEventListener('touchcancel', deactivate, { passive: false }); 
+
+            btn.addEventListener('mousedown', activate);
+            btn.addEventListener('mouseup', deactivate);
+            btn.addEventListener('mouseleave', () => {
+                 if (keys[controlKey] === true) deactivate(new Event('mouseleave'));
+            });
+        }
+
+        setMobileKey('btn-accelerate', 'accelerate');
+        setMobileKey('btn-left', 'left');
+        setMobileKey('btn-right', 'right');
+    }
+
+    function updateHUD() {
+        const currentSpeed = car.speed * SPEED_MULTIPLIER;
+        speedDisplay.textContent = `${currentSpeed.toFixed(1)} km/j`;
+        distanceDisplay.textContent = `${Math.floor(distance)} m`;
+    }
+
+</script>
+</body>
+</html>
